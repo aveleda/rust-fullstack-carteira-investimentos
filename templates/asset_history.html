@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+
+{% block title %}Histórico - {{ asset_name }}{% endblock %}
+
+{% block body %}
+<div class="max-w-3xl mx-auto px-6 py-10 text-white">
+    <a href="/" class="text-sm text-white/40 hover:text-cyan-400 transition-colors duration-300">&larr; voltar</a>
+    <h1 class="text-2xl font-bold text-cyan-400 mt-2 mb-8">{{ asset_name }}</h1>
+
+    {% if movements.is_empty() %}
+    <p class="text-white/40">Nenhuma movimentação registrada para esta moeda.</p>
+    {% else %}
+    <div class="flex flex-col gap-3">
+        {% for movement in movements %}
+        <div class="flex justify-between items-center bg-white/5 border border-white/10 rounded-xl px-5 py-4">
+            <div>
+                {% if movement.kind == "buy" %}
+                <span class="font-medium text-emerald-400">compra</span>
+                {% else %}
+                <span class="font-medium text-rose-400">venda</span>
+                {% endif %}
+                <span class="text-white/50 text-sm ml-2">{{ movement.created_at.format("%d/%m/%Y %H:%M") }}</span>
+            </div>
+            <div class="text-right text-sm text-white/70">
+                <div>{{ movement.quantity }} un.</div>
+                <div>preço unit.: {{ movement.unit_price }}</div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

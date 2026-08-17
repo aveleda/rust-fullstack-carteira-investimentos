@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+
+{% block title %}Minha Carteira{% endblock %}
+
+{% block body %}
+<div class="max-w-4xl mx-auto px-6 py-10 text-white">
+    <div class="flex justify-between items-center mb-10">
+        <h1 class="text-2xl font-bold text-cyan-400">Minha Carteira</h1>
+        <div class="flex items-center gap-4">
+            <span class="text-white/60">{{ username }}</span>
+            <a href="/logout" class="text-sm text-white/40 hover:text-cyan-400 transition-colors duration-300">sair</a>
+        </div>
+    </div>
+
+    <h2 class="text-lg text-white/70 mb-3">Minhas moedas</h2>
+    {% if holdings.is_empty() %}
+    <p class="text-white/40 mb-10">Você ainda não possui nenhuma moeda.</p>
+    {% else %}
+    <div class="grid gap-4 mb-10 sm:grid-cols-2">
+        {% for holding in holdings %}
+        <a href="/assets/{{ holding.asset_id }}" class="block bg-white/5 border border-white/10 rounded-xl p-5 hover:border-cyan-400/50 hover:shadow-[0_0_15px_rgba(34,211,238,0.15)] transition-all duration-300">
+            <div class="text-lg font-medium text-white">{{ holding.name }}</div>
+            <div class="text-white/50 text-sm mt-1">quantidade: {{ holding.quantity }}</div>
+            <div class="text-white/50 text-sm">valor unitário: {{ holding.unit_value }}</div>
+        </a>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <h2 class="text-lg text-white/70 mb-3">Comprar moedas</h2>
+    <div class="grid gap-4 sm:grid-cols-2">
+        {% for asset in assets %}
+        <form method="POST" action="/assets/{{ asset.id }}/buy" class="bg-white/5 border border-white/10 rounded-xl p-5 flex flex-col gap-3">
+            <div class="text-white font-medium">{{ asset.name }}</div>
+            <div class="text-white/50 text-sm">valor unitário: {{ asset.unit_value }}</div>
+            <input
+                type="number"
+                step="any"
+                min="0.0001"
+                name="quantity"
+                placeholder="quantidade"
+                required
+                class="px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white placeholder-white/30 focus:outline-none focus:border-cyan-400/50 transition-all duration-300"
+            >
+            <button type="submit" class="px-3 py-2 bg-cyan-500/20 border border-cyan-400/30 rounded-lg text-cyan-400 font-medium hover:bg-cyan-500/30 transition-all duration-300">comprar</button>
+        </form>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}

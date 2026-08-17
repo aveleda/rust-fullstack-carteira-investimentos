@@ -5,7 +5,7 @@ use sqlx::PgPool;
 
 use crate::{
     app::AppState,
-    models::{Asset, UserRecord},
+    models::{Asset, Holding, Movement, UserRecord},
 };
 
 pub struct Repository {
@@ -79,6 +79,72 @@ impl Repository {
             username
         )
         .fetch_optional(&self.db)
+        .await
+    }
+
+    pub async fn get_asset(&self, asset_id: i64) -> sqlx::Result<Option<Asset>> {
+        sqlx::query_as!(
+            Asset,
+            "SELECT id, name, unit_value
+             FROM assets
+             WHERE id = $1;",
+            asset_id
+        )
+        .fetch_optional(&self.db)
+        .await
+    }
+
+    pub async fn list_user_holdings(&self, user_id: i64) -> sqlx::Result<Vec<Holding>> {
+        sqlx::query_as!(
+            Holding,
+            r#"SELECT a.id AS asset_id, a.name, a.unit_value,
+                      SUM(CASE WHEN m.kind = 'buy' THEN m.quantity ELSE -m.quantity END) AS "quantity!: f64"
+               FROM movements m
+               JOIN assets a ON a.id = m.asset_id
+               WHERE m.user_id = $1
+               GROUP BY a.id, a.name, a.unit_value
+               HAVING SUM(CASE WHEN m.kind = 'buy' THEN m.quantity ELSE -m.quantity END) > 0
+               ORDER BY a.name;"#,
+            user_id
+        )
+        .fetch_all(&self.db)
+        .await
+    }
+
+    pub async fn list_movements(&self, user_id: i64, asset_id: i64) -> sqlx::Result<Vec<Movement>> {
+        sqlx::query_as!(
+            Movement,
+            "SELECT id, kind, quantity, unit_price, created_at
+             FROM movements
+             WHERE user_id = $1 AND asset_id = $2
+             ORDER BY created_at DESC;",
+            user_id,
+            asset_id
+        )
+        .fetch_all(&self.db)
+        .await
+    }
+
+    pub async fn create_movement(
+        &self,
+        user_id: i64,
+        asset_id: i64,
+        kind: &str,
+        quantity: f64,
+        unit_price: f64,
+    ) -> sqlx::Result<Movement> {
+        sqlx::query_as!(
+            Movement,
+            "INSERT INTO movements (user_id, asset_id, kind, quantity, unit_price)
+             VALUES ($1, $2, $3, $4, $5)
+             RETURNING id, kind, quantity, unit_price, created_at;",
+            user_id,
+            asset_id,
+            kind,
+            quantity,
+            unit_price
+        )
+        .fetch_one(&self.db)
         .await
     }
 }

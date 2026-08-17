@@ -11,7 +11,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::{app::AppState, error::AppError, repository::Repository};
 
-const SECRET_KEY: &[u8] = b"im-so-secret";
+/// Duração da sessão autenticada (validade do JWT e do cookie associado).
+pub fn session_duration() -> Duration {
+    Duration::from_hours(2)
+}
 
 pub struct UnauthenticatedUser {
     username: String,
@@ -68,15 +71,13 @@ impl User {
         self.id
     }
 
-    pub fn auth_token(self) -> Result<String, AppError> {
-        let key = HS256Key::from_bytes(SECRET_KEY);
-        let claims = Claims::with_custom_claims(UserClaims::from(self), Duration::from_mins(10));
+    pub fn auth_token(self, key: &HS256Key) -> Result<String, AppError> {
+        let claims = Claims::with_custom_claims(UserClaims::from(self), session_duration());
         let token = key.authenticate(claims)?;
         Ok(token)
     }
 
-    pub fn from_auth_token(token: &str) -> Result<Self, AppError> {
-        let key = HS256Key::from_bytes(SECRET_KEY);
+    pub fn from_auth_token(token: &str, key: &HS256Key) -> Result<Self, AppError> {
         let claims: UserClaims = key.verify_token(token, None)?.custom;
         Ok(Self::new(claims.id, claims.username))
     }
@@ -87,7 +88,7 @@ impl FromRequestParts<AppState> for User {
 
     async fn from_request_parts(
         parts: &mut axum::http::request::Parts,
-        _state: &AppState,
+        state: &AppState,
     ) -> Result<Self, Self::Rejection> {
         let jar = CookieJar::from_headers(&parts.headers);
 
@@ -96,7 +97,7 @@ impl FromRequestParts<AppState> for User {
             None => return Err(AppError::MissingAuthorization),
         };
 
-        User::from_auth_token(token)
+        User::from_auth_token(token, &state.jwt_key)
     }
 }
 
