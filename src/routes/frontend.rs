@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use askama::Template;
 use axum::{
     Form, Router,
@@ -15,9 +17,13 @@ use crate::{
     app::AppState,
     auth::user::{UnauthenticatedUser, User, session_duration},
     error::AppError,
-    models::{Asset, Holding, Movement},
+    models::{Asset, Movement},
     repository::{NewMovement, Repository},
 };
+
+/// Nome da moeda-âncora (1 real = 1 real) — a única que pode ser
+/// depositada diretamente, sem contrapartida em outro ativo.
+const DEPOSITABLE_CURRENCY: &str = "Real";
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -27,6 +33,7 @@ pub fn router() -> Router<AppState> {
         .route("/assets/{id}", get(asset_history))
         .route("/assets/{id}/buy", axum::routing::post(buy_asset))
         .route("/assets/{id}/sell", axum::routing::post(sell_asset))
+        .route("/assets/{id}/deposit", axum::routing::post(deposit_asset))
 }
 
 #[derive(Template)]
@@ -71,18 +78,30 @@ async fn logout(jar: CookieJar) -> impl IntoResponse {
     (jar.remove(Cookie::from("token")), Redirect::to("/login"))
 }
 
+/// Visão de uma moeda do catálogo já combinada com a posse do usuário
+/// (quantidade/preço médio ficam zerados quando ele nunca a negociou),
+/// para que cada moeda apareça só uma vez no dashboard.
+struct AssetOverview {
+    id: i64,
+    name: String,
+    unit_value: f64,
+    quantity: f64,
+    avg_unit_price: f64,
+    depositable: bool,
+}
+
 #[derive(Template)]
 #[template(path = "dashboard.html")]
 struct DashboardPage {
     username: String,
-    holdings: Vec<Holding>,
     /// Soma, em reais, do preço médio pago por cada moeda em carteira.
     total_invested: f64,
     /// Soma, em reais, do valor atual de cada moeda em carteira.
     total_current: f64,
-    crypto_assets: Vec<Asset>,
-    fiat_assets: Vec<Asset>,
-    /// Catálogo completo, usado para preencher o seletor de moeda de pagamento.
+    show_summary: bool,
+    crypto_overview: Vec<AssetOverview>,
+    fiat_overview: Vec<AssetOverview>,
+    /// Catálogo completo, usado para preencher os seletores de moeda de troca.
     assets: Vec<Asset>,
 }
 
@@ -96,25 +115,41 @@ async fn index(maybe_user: Option<User>, repository: Repository) -> Result<Respo
 
     let total_invested = holdings.iter().map(|h| h.quantity * h.avg_unit_price).sum();
     let total_current = holdings.iter().map(|h| h.quantity * h.unit_value).sum();
+    let show_summary = !holdings.is_empty();
 
-    let crypto_assets = assets
+    let holdings_by_asset: HashMap<i64, _> =
+        holdings.into_iter().map(|h| (h.asset_id, h)).collect();
+
+    let to_overview = |asset: &Asset| {
+        let holding = holdings_by_asset.get(&asset.id);
+        AssetOverview {
+            id: asset.id,
+            name: asset.name.clone(),
+            unit_value: asset.unit_value,
+            quantity: holding.map_or(0.0, |h| h.quantity),
+            avg_unit_price: holding.map_or(0.0, |h| h.avg_unit_price),
+            depositable: asset.name == DEPOSITABLE_CURRENCY,
+        }
+    };
+
+    let crypto_overview = assets
         .iter()
         .filter(|asset| asset.asset_type == "crypto")
-        .cloned()
+        .map(to_overview)
         .collect();
-    let fiat_assets = assets
+    let fiat_overview = assets
         .iter()
         .filter(|asset| asset.asset_type == "fiat")
-        .cloned()
+        .map(to_overview)
         .collect();
 
     let page = DashboardPage {
         username: user.username().clone(),
-        holdings,
         total_invested,
         total_current,
-        crypto_assets,
-        fiat_assets,
+        show_summary,
+        crypto_overview,
+        fiat_overview,
         assets,
     };
 
@@ -274,6 +309,37 @@ async fn sell_asset(
                 paid_currency_id: asset_id,
             },
         )
+        .await?;
+
+    Ok(Redirect::to("/"))
+}
+
+#[derive(Deserialize)]
+struct DepositForm {
+    amount: f64,
+}
+
+async fn deposit_asset(
+    user: User,
+    repository: Repository,
+    Path(asset_id): Path<i64>,
+    Form(request): Form<DepositForm>,
+) -> Result<impl IntoResponse, AppError> {
+    if request.amount <= 0.0 {
+        return Err(AppError::InvalidQuantity);
+    }
+
+    let asset = repository
+        .get_asset(asset_id)
+        .await?
+        .ok_or(AppError::AssetDoesNotExist)?;
+
+    if asset.name != DEPOSITABLE_CURRENCY {
+        return Err(AppError::InvalidCurrency);
+    }
+
+    repository
+        .deposit(user.id(), asset_id, request.amount, asset.unit_value)
         .await?;
 
     Ok(Redirect::to("/"))

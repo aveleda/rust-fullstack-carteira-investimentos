@@ -12,7 +12,7 @@
         </div>
     </div>
 
-    {% if !holdings.is_empty() %}
+    {% if show_summary %}
     {% let result = total_current - total_invested %}
     <div class="grid gap-4 mb-10 sm:grid-cols-3">
         <div class="bg-white/5 border border-white/10 rounded-xl p-5">
@@ -32,90 +32,121 @@
     </div>
     {% endif %}
 
-    <h2 class="text-lg text-white/70 mb-3">Minhas moedas</h2>
-    {% if holdings.is_empty() %}
-    <p class="text-white/40 mb-10">Você ainda não possui nenhuma moeda.</p>
-    {% else %}
+    <h2 class="text-lg text-white/70 mb-3">Criptomoedas</h2>
     <div class="grid gap-4 mb-10 sm:grid-cols-2">
-        {% for holding in holdings %}
+        {% for asset in crypto_overview %}
         <div class="bg-white/5 border border-white/10 rounded-xl p-5 flex flex-col gap-3">
             <div>
-                <div class="text-lg font-medium text-white">{{ holding.name }}</div>
-                <div class="text-white/50 text-sm mt-1">quantidade: {{ holding.quantity|fmt("{:.8}") }}</div>
-                <div class="text-white/50 text-sm">preço médio (R$): {{ holding.avg_unit_price|fmt("{:.2}") }}</div>
-                <div class="text-white/50 text-sm">preço atual (R$): {{ holding.unit_value|fmt("{:.2}") }}</div>
-                <a href="/assets/{{ holding.asset_id }}" class="text-sm text-cyan-400 hover:underline">ver histórico &rarr;</a>
+                <a href="/assets/{{ asset.id }}" class="text-lg font-medium text-white hover:text-cyan-400 transition-colors duration-300">{{ asset.name }}</a>
+                {% if asset.quantity > 0.0 %}
+                <div class="text-white/50 text-sm mt-1">quantidade: {{ asset.quantity|fmt("{:.8}") }}</div>
+                <div class="text-white/50 text-sm">preço médio (R$): {{ asset.avg_unit_price|fmt("{:.2}") }}</div>
+                {% endif %}
+                <div class="text-white/50 text-sm">preço atual (R$): {{ asset.unit_value|fmt("{:.2}") }}</div>
             </div>
-            <form method="POST" action="/assets/{{ holding.asset_id }}/sell" class="flex flex-col gap-2 border-t border-white/10 pt-3">
-                <div class="text-white/40 text-xs uppercase tracking-wide">Vender</div>
-                <input type="number" step="any" min="0.00000001" name="quantity" placeholder="quantidade" required
-                    class="px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white placeholder-white/30 focus:outline-none focus:border-rose-400/50 transition-all duration-300">
-                <div class="flex gap-2">
-                    <input type="number" step="any" min="0.00000001" name="received_amount" placeholder="valor recebido" required
-                        class="w-1/2 px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white placeholder-white/30 focus:outline-none focus:border-rose-400/50 transition-all duration-300">
-                    <select name="received_currency_id" required
-                        class="w-1/2 px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:border-rose-400/50 transition-all duration-300">
-                        {% for currency in assets %}
-                        {% if currency.id != holding.asset_id %}
-                        <option value="{{ currency.id }}">{{ currency.name }}</option>
-                        {% endif %}
-                        {% endfor %}
-                    </select>
-                </div>
-                <button type="submit" class="px-3 py-2 bg-rose-500/20 border border-rose-400/30 rounded-lg text-rose-400 font-medium hover:bg-rose-500/30 transition-all duration-300">vender</button>
-            </form>
+            <div class="flex gap-2">
+                <details class="flex-1">
+                    <summary class="cursor-pointer text-center px-3 py-2 bg-cyan-500/20 border border-cyan-400/30 rounded-lg text-cyan-400 font-medium hover:bg-cyan-500/30 transition-all duration-300">comprar</summary>
+                    <form method="POST" action="/assets/{{ asset.id }}/buy" class="flex flex-col gap-2 mt-2">
+                        <input type="number" step="any" min="0.00000001" name="quantity" placeholder="quantidade" required
+                            class="px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white placeholder-white/30 focus:outline-none focus:border-cyan-400/50 transition-all duration-300">
+                        <input type="number" step="any" min="0.00000001" name="paid_amount" placeholder="valor pago" required
+                            class="px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white placeholder-white/30 focus:outline-none focus:border-cyan-400/50 transition-all duration-300">
+                        <select name="paid_currency_id" required
+                            class="px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:border-cyan-400/50 transition-all duration-300">
+                            {% for currency in assets %}
+                            {% if currency.id != asset.id %}
+                            <option value="{{ currency.id }}">{{ currency.name }}</option>
+                            {% endif %}
+                            {% endfor %}
+                        </select>
+                        <button type="submit" class="px-3 py-2 bg-cyan-500/20 border border-cyan-400/30 rounded-lg text-cyan-400 font-medium hover:bg-cyan-500/30 transition-all duration-300">confirmar compra</button>
+                    </form>
+                </details>
+                <details class="flex-1">
+                    <summary class="cursor-pointer text-center px-3 py-2 bg-rose-500/20 border border-rose-400/30 rounded-lg text-rose-400 font-medium hover:bg-rose-500/30 transition-all duration-300">vender</summary>
+                    <form method="POST" action="/assets/{{ asset.id }}/sell" class="flex flex-col gap-2 mt-2">
+                        <input type="number" step="any" min="0.00000001" name="quantity" placeholder="quantidade" required
+                            class="px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white placeholder-white/30 focus:outline-none focus:border-rose-400/50 transition-all duration-300">
+                        <input type="number" step="any" min="0.00000001" name="received_amount" placeholder="valor recebido" required
+                            class="px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white placeholder-white/30 focus:outline-none focus:border-rose-400/50 transition-all duration-300">
+                        <select name="received_currency_id" required
+                            class="px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:border-rose-400/50 transition-all duration-300">
+                            {% for currency in assets %}
+                            {% if currency.id != asset.id %}
+                            <option value="{{ currency.id }}">{{ currency.name }}</option>
+                            {% endif %}
+                            {% endfor %}
+                        </select>
+                        <button type="submit" class="px-3 py-2 bg-rose-500/20 border border-rose-400/30 rounded-lg text-rose-400 font-medium hover:bg-rose-500/30 transition-all duration-300">confirmar venda</button>
+                    </form>
+                </details>
+            </div>
         </div>
         {% endfor %}
     </div>
-    {% endif %}
 
-    <h2 class="text-lg text-white/70 mb-3">Comprar criptomoedas</h2>
-    <div class="grid gap-4 mb-10 sm:grid-cols-2">
-        {% for asset in crypto_assets %}
-        <form method="POST" action="/assets/{{ asset.id }}/buy" class="bg-white/5 border border-white/10 rounded-xl p-5 flex flex-col gap-3">
-            <div class="text-white font-medium">{{ asset.name }}</div>
-            <div class="text-white/50 text-sm">preço atual (R$): {{ asset.unit_value|fmt("{:.2}") }}</div>
-            <input type="number" step="any" min="0.00000001" name="quantity" placeholder="quantidade" required
-                class="px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white placeholder-white/30 focus:outline-none focus:border-cyan-400/50 transition-all duration-300">
-            <div class="flex gap-2">
-                <input type="number" step="any" min="0.00000001" name="paid_amount" placeholder="valor pago" required
-                    class="w-1/2 px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white placeholder-white/30 focus:outline-none focus:border-cyan-400/50 transition-all duration-300">
-                <select name="paid_currency_id" required
-                    class="w-1/2 px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:border-cyan-400/50 transition-all duration-300">
-                    {% for currency in assets %}
-                    {% if currency.id != asset.id %}
-                    <option value="{{ currency.id }}">{{ currency.name }}</option>
-                    {% endif %}
-                    {% endfor %}
-                </select>
-            </div>
-            <button type="submit" class="px-3 py-2 bg-cyan-500/20 border border-cyan-400/30 rounded-lg text-cyan-400 font-medium hover:bg-cyan-500/30 transition-all duration-300">comprar</button>
-        </form>
-        {% endfor %}
-    </div>
-
-    <h2 class="text-lg text-white/70 mb-3">Comprar moedas fiduciárias</h2>
+    <h2 class="text-lg text-white/70 mb-3">Moedas fiduciárias</h2>
     <div class="grid gap-4 sm:grid-cols-2">
-        {% for asset in fiat_assets %}
-        <form method="POST" action="/assets/{{ asset.id }}/buy" class="bg-white/5 border border-white/10 rounded-xl p-5 flex flex-col gap-3">
-            <div class="text-white font-medium">{{ asset.name }}</div>
-            <div class="text-white/50 text-sm">preço atual (R$): {{ asset.unit_value|fmt("{:.2}") }}</div>
-            <input type="number" step="any" min="0.00000001" name="quantity" placeholder="quantidade" required
-                class="px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white placeholder-white/30 focus:outline-none focus:border-cyan-400/50 transition-all duration-300">
-            <div class="flex gap-2">
-                <input type="number" step="any" min="0.00000001" name="paid_amount" placeholder="valor pago" required
-                    class="w-1/2 px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white placeholder-white/30 focus:outline-none focus:border-cyan-400/50 transition-all duration-300">
-                <select name="paid_currency_id" required
-                    class="w-1/2 px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:border-cyan-400/50 transition-all duration-300">
-                    {% for currency in assets %}
-                    {% if currency.id != asset.id %}
-                    <option value="{{ currency.id }}">{{ currency.name }}</option>
-                    {% endif %}
-                    {% endfor %}
-                </select>
+        {% for asset in fiat_overview %}
+        <div class="bg-white/5 border border-white/10 rounded-xl p-5 flex flex-col gap-3">
+            <div>
+                <a href="/assets/{{ asset.id }}" class="text-lg font-medium text-white hover:text-cyan-400 transition-colors duration-300">{{ asset.name }}</a>
+                {% if asset.quantity > 0.0 %}
+                <div class="text-white/50 text-sm mt-1">quantidade: {{ asset.quantity|fmt("{:.8}") }}</div>
+                <div class="text-white/50 text-sm">preço médio (R$): {{ asset.avg_unit_price|fmt("{:.2}") }}</div>
+                {% endif %}
+                <div class="text-white/50 text-sm">preço atual (R$): {{ asset.unit_value|fmt("{:.2}") }}</div>
             </div>
-            <button type="submit" class="px-3 py-2 bg-cyan-500/20 border border-cyan-400/30 rounded-lg text-cyan-400 font-medium hover:bg-cyan-500/30 transition-all duration-300">comprar</button>
-        </form>
+            <div class="flex gap-2">
+                <details class="flex-1">
+                    <summary class="cursor-pointer text-center px-3 py-2 bg-cyan-500/20 border border-cyan-400/30 rounded-lg text-cyan-400 font-medium hover:bg-cyan-500/30 transition-all duration-300">comprar</summary>
+                    <form method="POST" action="/assets/{{ asset.id }}/buy" class="flex flex-col gap-2 mt-2">
+                        <input type="number" step="any" min="0.00000001" name="quantity" placeholder="quantidade" required
+                            class="px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white placeholder-white/30 focus:outline-none focus:border-cyan-400/50 transition-all duration-300">
+                        <input type="number" step="any" min="0.00000001" name="paid_amount" placeholder="valor pago" required
+                            class="px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white placeholder-white/30 focus:outline-none focus:border-cyan-400/50 transition-all duration-300">
+                        <select name="paid_currency_id" required
+                            class="px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:border-cyan-400/50 transition-all duration-300">
+                            {% for currency in assets %}
+                            {% if currency.id != asset.id %}
+                            <option value="{{ currency.id }}">{{ currency.name }}</option>
+                            {% endif %}
+                            {% endfor %}
+                        </select>
+                        <button type="submit" class="px-3 py-2 bg-cyan-500/20 border border-cyan-400/30 rounded-lg text-cyan-400 font-medium hover:bg-cyan-500/30 transition-all duration-300">confirmar compra</button>
+                    </form>
+                </details>
+                <details class="flex-1">
+                    <summary class="cursor-pointer text-center px-3 py-2 bg-rose-500/20 border border-rose-400/30 rounded-lg text-rose-400 font-medium hover:bg-rose-500/30 transition-all duration-300">vender</summary>
+                    <form method="POST" action="/assets/{{ asset.id }}/sell" class="flex flex-col gap-2 mt-2">
+                        <input type="number" step="any" min="0.00000001" name="quantity" placeholder="quantidade" required
+                            class="px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white placeholder-white/30 focus:outline-none focus:border-rose-400/50 transition-all duration-300">
+                        <input type="number" step="any" min="0.00000001" name="received_amount" placeholder="valor recebido" required
+                            class="px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white placeholder-white/30 focus:outline-none focus:border-rose-400/50 transition-all duration-300">
+                        <select name="received_currency_id" required
+                            class="px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:border-rose-400/50 transition-all duration-300">
+                            {% for currency in assets %}
+                            {% if currency.id != asset.id %}
+                            <option value="{{ currency.id }}">{{ currency.name }}</option>
+                            {% endif %}
+                            {% endfor %}
+                        </select>
+                        <button type="submit" class="px-3 py-2 bg-rose-500/20 border border-rose-400/30 rounded-lg text-rose-400 font-medium hover:bg-rose-500/30 transition-all duration-300">confirmar venda</button>
+                    </form>
+                </details>
+            </div>
+            {% if asset.depositable %}
+            <details>
+                <summary class="cursor-pointer text-center px-3 py-2 bg-emerald-500/20 border border-emerald-400/30 rounded-lg text-emerald-400 font-medium hover:bg-emerald-500/30 transition-all duration-300">depositar</summary>
+                <form method="POST" action="/assets/{{ asset.id }}/deposit" class="flex flex-col gap-2 mt-2">
+                    <input type="number" step="any" min="0.01" name="amount" placeholder="valor a depositar" required
+                        class="px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white placeholder-white/30 focus:outline-none focus:border-emerald-400/50 transition-all duration-300">
+                    <button type="submit" class="px-3 py-2 bg-emerald-500/20 border border-emerald-400/30 rounded-lg text-emerald-400 font-medium hover:bg-emerald-500/30 transition-all duration-300">confirmar depósito</button>
+                </form>
+            </details>
+            {% endif %}
+        </div>
         {% endfor %}
     </div>
 </div>

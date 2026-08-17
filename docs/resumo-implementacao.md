@@ -312,3 +312,38 @@ Cenário do relato reproduzido via `curl`: comprar `0.001` Bitcoin pagando em Re
 - Dashboard passou a mostrar **dois** cards em "Minhas moedas": Bitcoin (`0.0005` restante) **e** Dolar Americano (`33.65`, preço médio R$ 5,20 — igual à cotação usada na troca).
 - Histórico do Dólar mostra a movimentação de "compra" com "pago: 0,00050000 Bitcoin" — refletindo corretamente a origem do saldo.
 - `cargo build`, `cargo clippy --all-targets`, `cargo fmt` (arquivos alterados) e `cargo test` (role `invest_test`, 4/4) sem regressões.
+
+## 7. Simplificação do dashboard — uma moeda, um card
+
+Data: 2026-08-17
+
+### 7.1 Problema
+
+O dashboard tinha duplicação visual: a seção "Minhas moedas" mostrava um card (com link para o histórico e formulário de venda) para cada moeda que o usuário possuía, e mais abaixo as seções "Comprar criptomoedas"/"Comprar moedas fiduciárias" repetiam **a mesma moeda** num segundo card, só para comprar. Uma moeda que o usuário já possuía aparecia duas vezes na tela.
+
+### 7.2 Solução
+
+Cada moeda do catálogo passou a aparecer **uma única vez**, em `AssetOverview` (novo, em [src/routes/frontend.rs](../src/routes/frontend.rs)) — combina o ativo do catálogo com a posse do usuário (quantidade/preço médio ficam `0` quando ele nunca negociou aquela moeda, então essas linhas somem do card). O card de cada moeda tem:
+- O **nome**, como link para `/assets/{id}` — clicar nele mostra o extrato de movimentações (rota já existente, inalterada).
+- Dois botões, **comprar** e **vender**, implementados como `<details>`/`<summary>` do HTML — clicar expande o formulário correspondente (quantidade, valor, moeda de troca) sem precisar de JavaScript nenhum (mantém a mesma regra de "só o CDN do Tailwind como script").
+- Para a moeda `Real` especificamente, um terceiro botão, **depositar** — ver seção 7.3.
+
+As seções "Criptomoedas"/"Moedas fiduciárias" continuam existindo como agrupamento visual, mas agora cada uma lista o catálogo inteiro daquele tipo (não só o que o usuário possui), sempre um card por moeda.
+
+### 7.3 Depósito (moeda Real)
+
+Diferente de comprar/vender — que são sempre uma troca entre duas moedas do catálogo — um depósito é dinheiro entrando no sistema **sem** contrapartida em outro ativo (representa, por exemplo, uma transferência bancária externa). Por isso não reaproveita `create_trade`: `Repository::deposit` ([src/repository.rs](../src/repository.rs)) grava um único movimento de compra em que `paid_currency_id` referencia o próprio ativo (só faz sentido para a moeda-âncora, que vale sempre 1:1 em reais).
+
+- Restrito à moeda chamada exatamente `"Real"` (constante `DEPOSITABLE_CURRENCY` em [src/routes/frontend.rs](../src/routes/frontend.rs)), validado tanto na exibição do botão quanto na rota `POST /assets/{id}/deposit` — tentar depositar em outra moeda retorna `400`.
+- Simplificação assumida: a restrição é por **nome** (não existe uma coluna "é moeda-âncora" em `assets`); documentado aqui para o caso de precisar generalizar depois (ex.: um usuário cadastrar uma segunda moeda-âncora).
+- Continua sem verificação de saldo suficiente do lado do pagamento em compras (seção 6.2) — o depósito é, na prática, a forma "oficial" de colocar a primeira Real na carteira, mas nada impede pagar uma compra com uma moeda ainda não depositada (fica negativa e simplesmente não aparece nos cards, já que a agregação filtra saldo `> 0`).
+
+### 7.4 Validação
+
+Fluxo completo testado via `curl` com um usuário novo:
+- Dashboard inicial: cada moeda do catálogo aparece exatamente uma vez, com "comprar"/"vender"; somente `Real` tem "depositar".
+- Depositar `1000` em Real → `303`. Depositar em Dólar → `400` (`"Invalid payment currency"`).
+- Comprar `0.001` Bitcoin pagando `350` Real, depois vender `0.0004` Bitcoin recebendo `26` Real.
+- Saldo final conferido: Real = `676,00` (`1000 − 350 + 26`), Bitcoin = `0,0006` (`0,001 − 0,0004`), preço médio do Bitcoin permanece `350000,00`.
+- Extrato do Real (clicando no nome) mostra as três movimentações: depósito, débito da compra e crédito da venda.
+- `cargo build`, `cargo clippy --all-targets`, `cargo fmt` (arquivos alterados) e `cargo test` (role `invest_test`, 4/4) sem regressões.

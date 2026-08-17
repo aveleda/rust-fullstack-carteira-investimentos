@@ -209,6 +209,31 @@ impl Repository {
 
         Ok((primary_movement, counter_movement))
     }
+
+    /// Registra um depósito: dinheiro externo entrando no sistema, sem
+    /// contrapartida em outro ativo (por isso `paid_currency_id` referencia
+    /// o próprio `asset_id` — não é uma troca, é a origem do saldo).
+    pub async fn deposit(
+        &self,
+        user_id: i64,
+        asset_id: i64,
+        amount: f64,
+        unit_value: f64,
+    ) -> sqlx::Result<Movement> {
+        Self::insert_movement(
+            &self.db,
+            user_id,
+            NewMovement {
+                asset_id,
+                kind: "buy",
+                quantity: amount,
+                unit_price: unit_value,
+                paid_amount: amount,
+                paid_currency_id: asset_id,
+            },
+        )
+        .await
+    }
 }
 
 impl FromRequestParts<AppState> for Repository {
