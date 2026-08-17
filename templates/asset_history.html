@@ -24,7 +24,11 @@
             <div class="text-right text-sm text-white/70">
                 <div>{{ movement.quantity|fmt("{:.8}") }} un.</div>
                 <div>preço unit. (R$): {{ movement.unit_price|fmt("{:.2}") }}</div>
+                {% if movement.kind == "buy" %}
                 <div class="text-white/50">pago: {{ movement.paid_amount|fmt("{:.2}") }} {{ movement.paid_currency_name }}</div>
+                {% else %}
+                <div class="text-white/50">recebido: {{ movement.paid_amount|fmt("{:.2}") }} {{ movement.paid_currency_name }}</div>
+                {% endif %}
             </div>
         </div>
         {% endfor %}

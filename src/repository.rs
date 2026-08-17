@@ -129,6 +129,20 @@ impl Repository {
         .await
     }
 
+    pub async fn get_holding_quantity(&self, user_id: i64, asset_id: i64) -> sqlx::Result<f64> {
+        let row = sqlx::query!(
+            r#"SELECT COALESCE(SUM(CASE WHEN kind = 'buy' THEN quantity ELSE -quantity END), 0) AS "quantity!: f64"
+               FROM movements
+               WHERE user_id = $1 AND asset_id = $2;"#,
+            user_id,
+            asset_id
+        )
+        .fetch_one(&self.db)
+        .await?;
+
+        Ok(row.quantity)
+    }
+
     pub async fn list_movements(&self, user_id: i64, asset_id: i64) -> sqlx::Result<Vec<Movement>> {
         sqlx::query_as!(
             Movement,

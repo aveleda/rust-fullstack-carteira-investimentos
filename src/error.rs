@@ -16,6 +16,8 @@ pub enum AppError {
     InvalidQuantity,
     #[error("Invalid payment currency")]
     InvalidCurrency,
+    #[error("Insufficient holdings for this sale")]
+    InsufficientHoldings,
     #[error("Asset type must be 'crypto' or 'fiat'")]
     InvalidAssetType,
     #[error("This username is already registered")]
@@ -44,7 +46,8 @@ impl IntoResponse for AppError {
             | Self::MissingAuthorization
             | Self::InvalidQuantity
             | Self::InvalidCurrency
-            | Self::InvalidAssetType => StatusCode::BAD_REQUEST,
+            | Self::InvalidAssetType
+            | Self::InsufficientHoldings => StatusCode::BAD_REQUEST,
             Self::InvalidCredentials => StatusCode::UNAUTHORIZED,
             Self::AssetDoesNotExist | Self::UserDoesNotExist => StatusCode::NOT_FOUND,
             Self::Database(_) | Self::Template(_) | Self::Jwt(_) => {

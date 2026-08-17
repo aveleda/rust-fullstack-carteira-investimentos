@@ -256,3 +256,24 @@ Fluxo testado via `curl` nesta rodada:
 - Preço médio ponderado e resumo condensado (investido/atual/resultado) conferem com o cálculo manual esperado.
 - Tentativa de pagar um ativo com ele mesmo → `400`. Cadastro de tipo de asset inválido via API admin → `400`. Cadastro de nova moeda fiduciária (Libra Esterlina) e nova criptomoeda (Solana) via API admin → `200`.
 - `cargo build`, `cargo clippy --all-targets` e `cargo fmt` (nos arquivos alterados) sem erros/avisos.
+
+## 5. Rodada 3 — venda de moedas e frações menores que 0,01
+
+Data: 2026-08-17
+
+### 5.1 Venda de moedas
+- Nova rota `POST /assets/{id}/sell`, simétrica à de compra: recebe quantidade, valor recebido e em qual moeda o vendedor foi pago. O preço unitário em reais é calculado do mesmo jeito que na compra (`valor_recebido × unit_value_da_moeda / quantidade`).
+- A validação comum a compra e venda (quantidade/valor positivos, moeda de troca diferente do próprio ativo, moeda existente) foi extraída para `validate_and_price_trade` em [src/routes/frontend.rs](../src/routes/frontend.rs), reaproveitada por `buy_asset` e `sell_asset`.
+- Antes de gravar uma venda, `Repository::get_holding_quantity` (nova, em [src/repository.rs](../src/repository.rs)) confere quanto o usuário possui daquele ativo; vender mais do que se tem retorna `400` (`AppError::InsufficientHoldings`).
+- O preço médio de compra (`avg_unit_price`) continua calculado só a partir das compras (método de custo médio ponderado): vender não altera o preço médio das unidades restantes, só reduz a quantidade — é o comportamento esperado nesse método contábil, então a query da seção 1.2/4.3 não precisou mudar.
+- Cada card de "Minhas moedas" no dashboard ganhou um formulário de venda (quantidade, valor recebido, moeda), abaixo do link para o histórico. O histórico ([templates/asset_history.html](../templates/asset_history.html)) agora distingue "pago" (compra) de "recebido" (venda).
+
+### 5.2 Frações menores que 0,01
+- Os campos de quantidade e valor pago/recebido nos formulários de compra e venda tinham `min="0.0001"`/`min="0.01"` no HTML, o que bloqueava no navegador (antes mesmo de chegar ao servidor) valores bem pequenos — comuns em criptomoedas caras como Bitcoin (ex.: `0.00035` BTC, ou pagar/receber `35.00` já funcionava, mas quantidades ainda menores como `0.0001` ficavam no limite ou abaixo dele).
+- Todos esses mínimos foram reduzidos para `0.00000001` (1e-8, precisão de "satoshi") em [templates/dashboard.html](../templates/dashboard.html). O banco nunca teve essa restrição — o `CHECK` em `movements` sempre foi só "maior que zero" — então o ajuste é puramente no HTML.
+- Validado comprando `0.00035` Bitcoin pagando `122.50` em Real, e vendendo `0.0001` Bitcoin recebendo `35.00` em Real; saldo remanescente (`0.00025`) exibido corretamente no dashboard.
+
+### 5.3 Verificações
+- `cargo build`, `cargo clippy --all-targets` e `cargo fmt` (nos arquivos alterados) sem erros/avisos.
+- `cargo test` com a role `invest_test`: 4/4 continuam passando (nenhum teste automatizado cobria compra/venda ainda — validação desta rodada foi manual, via `curl`).
+- Fluxo manual: compra de fração pequena de Bitcoin, tentativa de venda maior que o saldo (`400`), venda parcial válida, histórico mostrando "pago"/"recebido" corretamente, quantidade líquida atualizada no dashboard.

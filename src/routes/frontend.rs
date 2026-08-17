@@ -26,6 +26,7 @@ pub fn router() -> Router<AppState> {
         .route("/logout", get(logout))
         .route("/assets/{id}", get(asset_history))
         .route("/assets/{id}/buy", axum::routing::post(buy_asset))
+        .route("/assets/{id}/sell", axum::routing::post(sell_asset))
 }
 
 #[derive(Template)]
@@ -147,6 +148,36 @@ async fn asset_history(
     Ok(Html(page.render()?))
 }
 
+/// Valida quantidade/valor e calcula o preço unitário em reais de uma
+/// compra ou venda, a partir da cotação atual da moeda usada na troca.
+async fn validate_and_price_trade(
+    repository: &Repository,
+    asset_id: i64,
+    quantity: f64,
+    counter_amount: f64,
+    counter_currency_id: i64,
+) -> Result<f64, AppError> {
+    if quantity <= 0.0 || counter_amount <= 0.0 {
+        return Err(AppError::InvalidQuantity);
+    }
+
+    if counter_currency_id == asset_id {
+        return Err(AppError::InvalidCurrency);
+    }
+
+    repository
+        .get_asset(asset_id)
+        .await?
+        .ok_or(AppError::AssetDoesNotExist)?;
+
+    let currency = repository
+        .get_asset(counter_currency_id)
+        .await?
+        .ok_or(AppError::InvalidCurrency)?;
+
+    Ok(counter_amount * currency.unit_value / quantity)
+}
+
 #[derive(Deserialize)]
 struct BuyForm {
     quantity: f64,
@@ -160,25 +191,14 @@ async fn buy_asset(
     Path(asset_id): Path<i64>,
     Form(request): Form<BuyForm>,
 ) -> Result<impl IntoResponse, AppError> {
-    if request.quantity <= 0.0 || request.paid_amount <= 0.0 {
-        return Err(AppError::InvalidQuantity);
-    }
-
-    if request.paid_currency_id == asset_id {
-        return Err(AppError::InvalidCurrency);
-    }
-
-    repository
-        .get_asset(asset_id)
-        .await?
-        .ok_or(AppError::AssetDoesNotExist)?;
-
-    let currency = repository
-        .get_asset(request.paid_currency_id)
-        .await?
-        .ok_or(AppError::InvalidCurrency)?;
-
-    let unit_price_brl = request.paid_amount * currency.unit_value / request.quantity;
+    let unit_price_brl = validate_and_price_trade(
+        &repository,
+        asset_id,
+        request.quantity,
+        request.paid_amount,
+        request.paid_currency_id,
+    )
+    .await?;
 
     repository
         .create_movement(
@@ -189,7 +209,51 @@ async fn buy_asset(
                 quantity: request.quantity,
                 unit_price: unit_price_brl,
                 paid_amount: request.paid_amount,
-                paid_currency_id: currency.id,
+                paid_currency_id: request.paid_currency_id,
+            },
+        )
+        .await?;
+
+    Ok(Redirect::to("/"))
+}
+
+#[derive(Deserialize)]
+struct SellForm {
+    quantity: f64,
+    received_amount: f64,
+    received_currency_id: i64,
+}
+
+async fn sell_asset(
+    user: User,
+    repository: Repository,
+    Path(asset_id): Path<i64>,
+    Form(request): Form<SellForm>,
+) -> Result<impl IntoResponse, AppError> {
+    let unit_price_brl = validate_and_price_trade(
+        &repository,
+        asset_id,
+        request.quantity,
+        request.received_amount,
+        request.received_currency_id,
+    )
+    .await?;
+
+    let held_quantity = repository.get_holding_quantity(user.id(), asset_id).await?;
+    if request.quantity > held_quantity {
+        return Err(AppError::InsufficientHoldings);
+    }
+
+    repository
+        .create_movement(
+            user.id(),
+            NewMovement {
+                asset_id,
+                kind: "sell",
+                quantity: request.quantity,
+                unit_price: unit_price_brl,
+                paid_amount: request.received_amount,
+                paid_currency_id: request.received_currency_id,
             },
         )
         .await?;
