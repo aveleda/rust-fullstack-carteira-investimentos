@@ -150,13 +150,14 @@ async fn asset_history(
 
 /// Valida quantidade/valor e calcula o preço unitário em reais de uma
 /// compra ou venda, a partir da cotação atual da moeda usada na troca.
+/// Retorna `(preço_unitário_do_ativo_em_reais, cotação_atual_da_moeda_usada)`.
 async fn validate_and_price_trade(
     repository: &Repository,
     asset_id: i64,
     quantity: f64,
     counter_amount: f64,
     counter_currency_id: i64,
-) -> Result<f64, AppError> {
+) -> Result<(f64, f64), AppError> {
     if quantity <= 0.0 || counter_amount <= 0.0 {
         return Err(AppError::InvalidQuantity);
     }
@@ -175,7 +176,8 @@ async fn validate_and_price_trade(
         .await?
         .ok_or(AppError::InvalidCurrency)?;
 
-    Ok(counter_amount * currency.unit_value / quantity)
+    let unit_price_brl = counter_amount * currency.unit_value / quantity;
+    Ok((unit_price_brl, currency.unit_value))
 }
 
 #[derive(Deserialize)]
@@ -191,7 +193,7 @@ async fn buy_asset(
     Path(asset_id): Path<i64>,
     Form(request): Form<BuyForm>,
 ) -> Result<impl IntoResponse, AppError> {
-    let unit_price_brl = validate_and_price_trade(
+    let (unit_price_brl, currency_unit_value) = validate_and_price_trade(
         &repository,
         asset_id,
         request.quantity,
@@ -201,7 +203,7 @@ async fn buy_asset(
     .await?;
 
     repository
-        .create_movement(
+        .create_trade(
             user.id(),
             NewMovement {
                 asset_id,
@@ -210,6 +212,14 @@ async fn buy_asset(
                 unit_price: unit_price_brl,
                 paid_amount: request.paid_amount,
                 paid_currency_id: request.paid_currency_id,
+            },
+            NewMovement {
+                asset_id: request.paid_currency_id,
+                kind: "sell",
+                quantity: request.paid_amount,
+                unit_price: currency_unit_value,
+                paid_amount: request.quantity,
+                paid_currency_id: asset_id,
             },
         )
         .await?;
@@ -230,7 +240,7 @@ async fn sell_asset(
     Path(asset_id): Path<i64>,
     Form(request): Form<SellForm>,
 ) -> Result<impl IntoResponse, AppError> {
-    let unit_price_brl = validate_and_price_trade(
+    let (unit_price_brl, currency_unit_value) = validate_and_price_trade(
         &repository,
         asset_id,
         request.quantity,
@@ -245,7 +255,7 @@ async fn sell_asset(
     }
 
     repository
-        .create_movement(
+        .create_trade(
             user.id(),
             NewMovement {
                 asset_id,
@@ -254,6 +264,14 @@ async fn sell_asset(
                 unit_price: unit_price_brl,
                 paid_amount: request.received_amount,
                 paid_currency_id: request.received_currency_id,
+            },
+            NewMovement {
+                asset_id: request.received_currency_id,
+                kind: "buy",
+                quantity: request.received_amount,
+                unit_price: currency_unit_value,
+                paid_amount: request.quantity,
+                paid_currency_id: asset_id,
             },
         )
         .await?;

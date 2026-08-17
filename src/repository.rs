@@ -159,11 +159,14 @@ impl Repository {
         .await
     }
 
-    pub async fn create_movement(
-        &self,
+    async fn insert_movement<'c, E>(
+        executor: E,
         user_id: i64,
         movement: NewMovement<'_>,
-    ) -> sqlx::Result<Movement> {
+    ) -> sqlx::Result<Movement>
+    where
+        E: sqlx::PgExecutor<'c>,
+    {
         sqlx::query_as!(
             Movement,
             r#"WITH inserted AS (
@@ -183,8 +186,28 @@ impl Repository {
             movement.paid_amount,
             movement.paid_currency_id
         )
-        .fetch_one(&self.db)
+        .fetch_one(executor)
         .await
+    }
+
+    /// Registra uma troca completa: o movimento do ativo negociado
+    /// (`primary`) e, atomicamente, o movimento inverso na moeda usada
+    /// na troca (`counter`) — é assim que vender uma moeda faz a moeda
+    /// recebida aparecer na carteira, e vice-versa na compra.
+    pub async fn create_trade(
+        &self,
+        user_id: i64,
+        primary: NewMovement<'_>,
+        counter: NewMovement<'_>,
+    ) -> sqlx::Result<(Movement, Movement)> {
+        let mut tx = self.db.begin().await?;
+
+        let primary_movement = Self::insert_movement(&mut *tx, user_id, primary).await?;
+        let counter_movement = Self::insert_movement(&mut *tx, user_id, counter).await?;
+
+        tx.commit().await?;
+
+        Ok((primary_movement, counter_movement))
     }
 }
 

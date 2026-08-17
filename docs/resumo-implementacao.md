@@ -277,3 +277,38 @@ Data: 2026-08-17
 - `cargo build`, `cargo clippy --all-targets` e `cargo fmt` (nos arquivos alterados) sem erros/avisos.
 - `cargo test` com a role `invest_test`: 4/4 continuam passando (nenhum teste automatizado cobria compra/venda ainda — validação desta rodada foi manual, via `curl`).
 - Fluxo manual: compra de fração pequena de Bitcoin, tentativa de venda maior que o saldo (`400`), venda parcial válida, histórico mostrando "pago"/"recebido" corretamente, quantidade líquida atualizada no dashboard.
+
+## 6. Bug reportado — moeda recebida na venda não aparecia na carteira
+
+Data: 2026-08-17
+
+### 6.1 Causa
+
+Uma venda (ex.: vender Bitcoin recebendo Dólar) gravava **apenas um** registro em `movements`: o do ativo vendido (Bitcoin), com `paid_currency_id`/`paid_amount` guardando só a *informação* de que a troca foi feita em Dólar — sem nunca criar um movimento correspondente **do lado do Dólar**. Como `list_user_holdings` calcula a posse de cada moeda somando os movimentos daquele `asset_id`, o Dólar nunca ganhava uma linha própria e por isso nunca aparecia em "Minhas moedas", mesmo tendo sido recebido na troca.
+
+O mesmo problema existia (de forma menos visível) na compra: pagar por um ativo com outra moeda do catálogo não debitava essa moeda da carteira.
+
+### 6.2 Correção
+
+Toda compra/venda agora grava **dois movimentos, atomicamente, dentro de uma transação**:
+1. O movimento do ativo negociado (como antes).
+2. Um movimento **inverso** na moeda usada na troca — vender A recebendo B grava um "buy" de B (usando o ativo A como `paid_currency_id`/quantidade dele como `paid_amount`); comprar A pagando com C grava um "sell" de C.
+
+Implementado em `Repository::create_trade` ([src/repository.rs](../src/repository.rs)), que abre uma transação (`self.db.begin()`), insere os dois movimentos e comita — ambos são gravados ou nenhum é, evitando um estado "pela metade" em caso de falha. `buy_asset`/`sell_asset` ([src/routes/frontend.rs](../src/routes/frontend.rs)) passaram a chamar `create_trade` em vez do antigo `create_movement` (removido).
+
+O preço unitário (em reais) do movimento inverso usa a cotação atual da moeda envolvida (`Asset.unit_value`) — matematicamente é o mesmo valor que já era usado para calcular o preço em reais do ativo principal, então os dois lados da troca ficam consistentes entre si (nenhuma diferença de arredondamento entre o valor debitado de um lado e creditado do outro).
+
+Efeito colateral desejado: como a moeda recebida numa venda passa a ter seu próprio saldo, ela também ganha seu próprio card com formulário de venda no dashboard — pode ser vendida ou usada para pagar novas compras normalmente.
+
+Não há verificação de saldo suficiente da moeda *usada para pagar* numa compra (só do ativo vendido, numa venda) — de propósito: é assim que um usuário novo consegue comprar a primeira moeda sem já ter fundos cadastrados no sistema. Pagar com uma moeda que ainda não se possui deixa o saldo dela negativo, que simplesmente não aparece em "Minhas moedas" (a consulta já filtra saldo `> 0`). Ver seção "melhorias futuras" — considerar exigir saldo suficiente também do lado do pagamento, uma vez que o usuário tenha feito seu primeiro depósito/compra inicial.
+
+### 6.3 Bug de exibição encontrado durante a correção
+
+Ao validar o cenário reportado, o histórico de movimentação mostrava "pago: 0.00 Bitcoin" para uma venda de `0.0005` BTC — porque `movement.paid_amount` era formatado com 2 casas decimais (`fmt("{:.2}")`), adequado para valores em reais mas insuficiente para quantidades de criptomoeda. Corrigido em [templates/asset_history.html](../templates/asset_history.html) usando 8 casas decimais (mesma precisão já usada para `quantity`), evitando o truncamento para "0.00".
+
+### 6.4 Validação
+
+Cenário do relato reproduzido via `curl`: comprar `0.001` Bitcoin pagando em Real, depois vender `0.0005` Bitcoin recebendo `33.65` em Dólar Americano.
+- Dashboard passou a mostrar **dois** cards em "Minhas moedas": Bitcoin (`0.0005` restante) **e** Dolar Americano (`33.65`, preço médio R$ 5,20 — igual à cotação usada na troca).
+- Histórico do Dólar mostra a movimentação de "compra" com "pago: 0,00050000 Bitcoin" — refletindo corretamente a origem do saldo.
+- `cargo build`, `cargo clippy --all-targets`, `cargo fmt` (arquivos alterados) e `cargo test` (role `invest_test`, 4/4) sem regressões.
