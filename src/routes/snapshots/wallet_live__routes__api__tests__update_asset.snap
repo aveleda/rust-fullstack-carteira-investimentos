@@ -1,9 +1,9 @@
 ---
 source: src/routes/api.rs
-expression: updated_asset
+expression: "serde_json::json!({\n    \"name\": updated_asset.name, \"unit_value\": updated_asset.unit_value,\n    \"asset_type\": updated_asset.asset_type,\n})"
 ---
 {
-  "id": 1,
+  "asset_type": "crypto",
   "name": "Ethereum",
   "unit_value": 20.0
 }

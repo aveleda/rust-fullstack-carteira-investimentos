@@ -1,11 +1,9 @@
 ---
 source: src/routes/api.rs
-expression: assets
+expression: "serde_json::json!({\n    \"name\": bitcoin.name, \"unit_value\": bitcoin.unit_value, \"asset_type\":\n    bitcoin.asset_type,\n})"
 ---
-[
-  {
-    "id": 1,
-    "name": "Bitcoin",
-    "unit_value": 10.0
-  }
-]
+{
+  "asset_type": "crypto",
+  "name": "Bitcoin",
+  "unit_value": 10.0
+}

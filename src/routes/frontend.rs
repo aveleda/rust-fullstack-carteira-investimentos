@@ -16,7 +16,7 @@ use crate::{
     auth::user::{UnauthenticatedUser, User, session_duration},
     error::AppError,
     models::{Asset, Holding, Movement},
-    repository::Repository,
+    repository::{NewMovement, Repository},
 };
 
 pub fn router() -> Router<AppState> {
@@ -75,6 +75,13 @@ async fn logout(jar: CookieJar) -> impl IntoResponse {
 struct DashboardPage {
     username: String,
     holdings: Vec<Holding>,
+    /// Soma, em reais, do preço médio pago por cada moeda em carteira.
+    total_invested: f64,
+    /// Soma, em reais, do valor atual de cada moeda em carteira.
+    total_current: f64,
+    crypto_assets: Vec<Asset>,
+    fiat_assets: Vec<Asset>,
+    /// Catálogo completo, usado para preencher o seletor de moeda de pagamento.
     assets: Vec<Asset>,
 }
 
@@ -86,9 +93,27 @@ async fn index(maybe_user: Option<User>, repository: Repository) -> Result<Respo
     let holdings = repository.list_user_holdings(user.id()).await?;
     let assets = repository.list_assets().await?;
 
+    let total_invested = holdings.iter().map(|h| h.quantity * h.avg_unit_price).sum();
+    let total_current = holdings.iter().map(|h| h.quantity * h.unit_value).sum();
+
+    let crypto_assets = assets
+        .iter()
+        .filter(|asset| asset.asset_type == "crypto")
+        .cloned()
+        .collect();
+    let fiat_assets = assets
+        .iter()
+        .filter(|asset| asset.asset_type == "fiat")
+        .cloned()
+        .collect();
+
     let page = DashboardPage {
         username: user.username().clone(),
         holdings,
+        total_invested,
+        total_current,
+        crypto_assets,
+        fiat_assets,
         assets,
     };
 
@@ -125,6 +150,8 @@ async fn asset_history(
 #[derive(Deserialize)]
 struct BuyForm {
     quantity: f64,
+    paid_amount: f64,
+    paid_currency_id: i64,
 }
 
 async fn buy_asset(
@@ -133,22 +160,37 @@ async fn buy_asset(
     Path(asset_id): Path<i64>,
     Form(request): Form<BuyForm>,
 ) -> Result<impl IntoResponse, AppError> {
-    if request.quantity <= 0.0 {
+    if request.quantity <= 0.0 || request.paid_amount <= 0.0 {
         return Err(AppError::InvalidQuantity);
     }
 
-    let asset = repository
+    if request.paid_currency_id == asset_id {
+        return Err(AppError::InvalidCurrency);
+    }
+
+    repository
         .get_asset(asset_id)
         .await?
         .ok_or(AppError::AssetDoesNotExist)?;
 
+    let currency = repository
+        .get_asset(request.paid_currency_id)
+        .await?
+        .ok_or(AppError::InvalidCurrency)?;
+
+    let unit_price_brl = request.paid_amount * currency.unit_value / request.quantity;
+
     repository
         .create_movement(
             user.id(),
-            asset_id,
-            "buy",
-            request.quantity,
-            asset.unit_value,
+            NewMovement {
+                asset_id,
+                kind: "buy",
+                quantity: request.quantity,
+                unit_price: unit_price_brl,
+                paid_amount: request.paid_amount,
+                paid_currency_id: currency.id,
+            },
         )
         .await?;
 

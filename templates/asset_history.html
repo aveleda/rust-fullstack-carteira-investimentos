@@ -22,8 +22,9 @@
                 <span class="text-white/50 text-sm ml-2">{{ movement.created_at.format("%d/%m/%Y %H:%M") }}</span>
             </div>
             <div class="text-right text-sm text-white/70">
-                <div>{{ movement.quantity }} un.</div>
-                <div>preço unit.: {{ movement.unit_price }}</div>
+                <div>{{ movement.quantity|fmt("{:.8}") }} un.</div>
+                <div>preço unit. (R$): {{ movement.unit_price|fmt("{:.2}") }}</div>
+                <div class="text-white/50">pago: {{ movement.paid_amount|fmt("{:.2}") }} {{ movement.paid_currency_name }}</div>
             </div>
         </div>
         {% endfor %}

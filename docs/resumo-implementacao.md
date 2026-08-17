@@ -176,3 +176,83 @@ Após a criação da role `invest_test` (seção 2.2), foi validado neste ambien
 - Fluxo funcional validado via `curl` novamente após as mudanças: login/registro automático → cookie de sessão (`HttpOnly`, `SameSite=Lax`, `Max-Age=7200`) → dashboard (`200`) → `/logout` (`303` com cookie expirado) → dashboard sem sessão redireciona para `/login` (`303`).
 
 Estado atual: todas as melhorias propostas estão implementadas e verificadas — sessão JWT segura e com logout, modelo de dados usuário↔moeda com histórico e isolamento entre usuários, frontend pós-login com Tailwind CDN único, e a separação de privilégios de banco entre a role de produção e a role de testes.
+
+## 4. Rodada 2 — múltiplas moedas, valor pago e resumo condensado
+
+Data: 2026-08-17
+
+### 4.1 Catálogo com criptomoedas e moedas fiduciárias
+- Nova coluna `assets.asset_type` (`crypto` ou `fiat`), validada em `POST /api/assets` — um tipo fora desse conjunto retorna `400 Bad Request` (`AppError::InvalidAssetType`).
+- A migration da seção 4.4 semeia três moedas fiduciárias padrão: `Real` (âncora, R$ 1,00), `Dolar Americano` (R$ 5,20) e `Euro` (R$ 5,60). Novas criptomoedas ou moedas fiduciárias são cadastradas pelo mesmo endpoint admin já existente, agora informando `asset_type`.
+- O dashboard passou a exibir dois catálogos de compra separados — "Comprar criptomoedas" e "Comprar moedas fiduciárias" — filtrando `assets` por `asset_type` em [src/routes/frontend.rs](../src/routes/frontend.rs).
+
+### 4.2 Valor e moeda usados na compra
+- `movements` ganhou `paid_amount` (quanto foi efetivamente pago) e `paid_currency_id` (em qual moeda do catálogo) — ver migration na seção 4.4.
+- O formulário de compra ([templates/dashboard.html](../templates/dashboard.html)) pede quantidade, valor pago e a moeda de pagamento (qualquer outra moeda do catálogo, cripto ou fiduciária).
+- `unit_price` (sempre em reais, para manter a base de cálculo do preço médio) é derivado no momento da compra: `paid_amount × unit_value_da_moeda_escolhida / quantidade`. Isso permite pagar em qualquer moeda (ex.: comprar Ethereum pagando em dólares) sem perder a base em reais.
+- Validações: `quantity`/`paid_amount` devem ser positivos, e a moeda de pagamento não pode ser o próprio ativo comprado (`AppError::InvalidCurrency`, `400`).
+- O histórico ([templates/asset_history.html](../templates/asset_history.html)) mostra, por movimentação, o preço unitário em reais **e** "pago: `<valor>` `<moeda>`".
+
+### 4.3 Resumo condensado com valor médio em reais
+- `Holding` (agregação por moeda) ganhou `avg_unit_price`: preço médio de compra em reais, ponderado pela quantidade comprada (`SUM(quantity*unit_price) / SUM(quantity)` sobre as compras).
+- O dashboard exibe, por moeda em carteira: quantidade, preço médio (R$) e preço atual (R$).
+- Um card de resumo no topo do dashboard soma, em reais, o valor investido (`Σ quantidade × preço médio`) e o valor atual (`Σ quantidade × preço atual`), e mostra o resultado (lucro/perda) em verde ou vermelho.
+- Simplificação assumida: o preço médio considera apenas movimentações de compra (a UI ainda não expõe venda); documentado aqui para não ser esquecido caso a venda seja implementada depois.
+
+### 4.4 Nova migration
+
+```sql
+-- migrations/20260817130000_add_asset_type_and_payment_currency.up.sql
+ALTER TABLE assets
+ ADD COLUMN asset_type TEXT NOT NULL DEFAULT 'crypto' CHECK (asset_type IN ('crypto', 'fiat'));
+
+ALTER TABLE assets ALTER COLUMN asset_type DROP DEFAULT;
+
+INSERT INTO assets (name, unit_value, asset_type) VALUES
+ ('Real', 1, 'fiat'),
+ ('Dolar Americano', 5.2, 'fiat'),
+ ('Euro', 5.6, 'fiat')
+ON CONFLICT (name) DO NOTHING;
+
+ALTER TABLE movements
+ ADD COLUMN paid_amount DOUBLE PRECISION,
+ ADD COLUMN paid_currency_id BIGINT REFERENCES assets (id);
+
+-- Movimentações registradas antes desta migration não têm moeda de
+-- pagamento explícita; assume-se que o preço já estava em reais.
+UPDATE movements
+SET paid_amount = quantity * unit_price,
+    paid_currency_id = (SELECT id FROM assets WHERE name = 'Real')
+WHERE paid_amount IS NULL;
+
+ALTER TABLE movements
+ ALTER COLUMN paid_amount SET NOT NULL,
+ ALTER COLUMN paid_currency_id SET NOT NULL;
+
+ALTER TABLE movements ADD CONSTRAINT movements_paid_amount_positive CHECK (paid_amount > 0);
+```
+
+Aplicada nos dois bancos deste ambiente:
+
+```bash
+DATABASE_URL=postgres://invest:invest@localhost:5432/invest sqlx migrate run
+DATABASE_URL=postgres://invest_test:invest_test@localhost:5432/invest_test sqlx migrate run
+```
+
+Rollback, se necessário (`sqlx migrate revert`): remove as colunas novas de `movements` e `asset_type` de `assets`, mas **não** remove as moedas fiduciárias semeadas (linhas de catálogo inofensivas de se manter).
+
+### 4.5 Testes
+
+Como a migration passou a semear moedas fiduciárias em todo banco recém-migrado (inclusive nos bancos efêmeros que o `#[sqlx::test]` cria), os testes de asset não podem mais assumir `id`s fixos (ex.: "o primeiro asset criado tem id 1"). Ajustes em [src/routes/api.rs](../src/routes/api.rs):
+
+- `test_create_asset`, `test_list_assets` e `test_update_asset` passaram a criar o asset dinamicamente dentro do próprio teste (em vez do fixture `bitcoin_asset.sql`, removido) e a excluir o `id` do snapshot do `insta` (comparando só `name`/`unit_value`/`asset_type`).
+- Novo teste `test_create_asset_rejects_invalid_type`, cobrindo a validação da seção 4.1.
+- `cargo test` com a role dedicada `invest_test` (seção 2.2): **4/4 testes passam**.
+
+### 4.6 Validação manual
+
+Fluxo testado via `curl` nesta rodada:
+- Compra de Ethereum pagando com Dólar Americano e, em seguida, com Real — preço unitário em reais calculado corretamente em cada caso a partir da cotação da moeda de pagamento.
+- Preço médio ponderado e resumo condensado (investido/atual/resultado) conferem com o cálculo manual esperado.
+- Tentativa de pagar um ativo com ele mesmo → `400`. Cadastro de tipo de asset inválido via API admin → `400`. Cadastro de nova moeda fiduciária (Libra Esterlina) e nova criptomoeda (Solana) via API admin → `200`.
+- `cargo build`, `cargo clippy --all-targets` e `cargo fmt` (nos arquivos alterados) sem erros/avisos.
